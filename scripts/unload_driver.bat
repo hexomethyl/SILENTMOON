@@ -1,0 +1,1 @@
+sc delete EneIo64
